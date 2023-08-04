@@ -1,0 +1,171 @@
+---
+title: "ZOIB Model for proportion of Age-0 Chinook salmon consumed by Steller sea lions along the Washington Coast"
+author: "Zoë Lewis and Dr. Benjamin Nelson"
+date: "2023-07-25"
+output: 
+ html_document:
+    toc: true
+    toc_float:
+      toc_collapsed: true
+    toc_depth: 3
+    code_folding: show
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Required packages, environment prep, and data loading
+
+Input data file is the proportion of Chinook salmon consumed per age group, by individual Steller sea lions. Age proportions determined via adapted decision tree, and aged ratios determined monthly. 
+
+```{r, echo = F}
+library(readxl)
+proportions <- read_xlsx("model inputs.xlsx", sheet = "Chinook age proportions")
+
+knitr::kable(proportions, align = "l")
+```
+
+
+The following code details the loading of age-0 data, as determined in "1-CalculatedAge0.R". 
+
+
+```{r echo = F, output = F}
+library(dplyr)
+library(tidyr)
+library(colorspace)
+library(viridis)
+library(zoib)
+library(ggplot2)
+library(lemon)
+library(readxl)
+
+rm(list=ls()) 
+gc() 
+
+set.seed(99)
+
+RRAdat <- read_xlsx("model inputs.xlsx", sheet = "Chinook RRA")
+RRAdat$PRCNT <- RRAdat$RRA
+
+age_proportion <- read_xlsx("model inputs.xlsx", sheet = "Chinook age proportions")
+
+metadata <- read_xlsx("model inputs.xlsx", sheet = "metadata")
+
+RRA_age <-  merge(RRAdat, age_proportion, by = "season")
+
+RRA_age$unkRRA <- (RRA_age$RRA*RRA_age$Other)             
+RRA_age$Age0RRA<- (RRA_age$RRA*RRA_age$Age0)
+
+RRA_age0 <- RRA_age %>% select(sample, Age0RRA)
+
+model_df <- merge(RRA_age0, metadata, all = TRUE, by.x= "sample") %>% replace_na(list(Age0RRA=0))
+
+model_df$diet_prop <- model_df$Age0RRA
+model_df$species <- "age0"
+```
+
+## Build the structure of the model df
+
+```{r}
+model_df$sample<- as.factor(model_df$sample)
+model_df$site<- as.factor(model_df$site)
+model_df$season<- as.factor(model_df$season)
+```
+
+
+## Plot of diet props, by season and sex
+
+```{r}
+plot_col<- viridis(5)# Colors
+site_cols<- c("Tatoosh Cut"=plot_col[1], "Sea Lion Rock"=plot_col[3])
+site_cols_fill<- c("Tatoosh Cut"=alpha(plot_col[1], 0.25), "Sea Lion Rock"=alpha(plot_col[3], 0.25))
+# Labels
+season_labs<- c("winter"="Winter", "spring"="Spring", "summer"="Summer")
+site_labs<- c("Tatoosh Cut"="Tatoosh Cut", "Sea Lion Rock"="Sea Lion Rock")   
+season_labels_alt<- c("W", "Spr", "Sum")
+# Build plot
+prop_plot <- ggplot(model_df, aes(x=season, y=diet_prop)) + 
+  geom_jitter(aes( alpha=0.25), shape=16, width = 0.25) +  
+  geom_violin(aes(), trim = TRUE, scale = "area") +
+  labs(x="Month", y="Diet proportion") + 
+  scale_fill_manual(values=site_cols_fill) + 
+  scale_color_manual(values=site_cols) + 
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        strip.text.x = element_text(size=12, color="black",                                     face="bold"), 
+        strip.text.y = element_text(size=12, color="black", face="bold"), 
+        legend.position = "none",
+        axis.title.x = element_text(face="bold", size=14, hjust = 0.5, vjust = 0.00),
+        axis.title.y = element_text(face="bold", size=14, hjust = 0.5, vjust = 2.50),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        panel.spacing = unit(1.15, "lines")) 
+
+prop_plot
+
+```
+
+## Preview model data frame 
+
+```{r}
+head(model_df)
+```
+
+## Fit the model
+
+Here we run 4 MCMC chains on a seasonal model that assumes that the average diet proportion varies by season.
+
+```{r}
+chains = 4 # Number of MCMC chains to run
+
+seasonal<- zoib(model_df$diet_prop ~ as.factor(season)|1|1, data=model_df, random = 0, EUID=model_df$sample, joint=FALSE, 
+                zero.inflation = TRUE, one.inflation = FALSE, 
+                n.iter = 2000, 
+                n.chain = chains, 
+                n.thin = 1, 
+                n.burn = 1000)
+
+preds_seasonal<- rbind(seasonal$ypred[[1]], seasonal$ypred[[2]], seasonal$ypred[[3]], seasonal$ypred[[4]])
+```
+
+## Produce n samples from the posterior predictive distributions, for each season
+
+```{r}
+n_samples<- 10000
+# This is the start of each season in the sample list
+winter_start <- as.numeric(row.names(model_df[model_df$season=="winter", ]))[1]
+spring_start<- as.numeric(row.names(model_df[model_df$season=="spring", ]))[1]
+summer_start<- as.numeric(row.names(model_df[model_df$season=="summer", ]))[1]
+
+# Generate n samples for each seasonal estimate
+winter_samples <- sample(preds_seasonal[,winter_start], n_samples, TRUE)
+spring_samples<- sample(preds_seasonal[,spring_start], n_samples, TRUE)
+summer_samples<- sample(preds_seasonal[,summer_start], n_samples, TRUE)
+```
+
+
+## Plot seasonal diet proportions (histagram of n_samples)
+
+```{r}
+par(mfrow=c(3,1), oma=c(5,4,2,1), mar=c(1,0,1,0)+0.1)
+hist(winter_samples, xlim=c(0,0.04), ann=FALSE, yaxt="n", col = alpha(plot_col[1], 0.50), breaks=15)
+mtext(side=2, font=2, line=2.0, "Winter", outer = FALSE)
+hist(spring_samples, xlim=c(0,0.04), ann=FALSE, yaxt="n", col = alpha(plot_col[2], 0.50), breaks=15)
+mtext(side=2, font=2, line=2.0, "Spring", outer = FALSE)
+hist(summer_samples, xlim=c(0,0.04), ann=FALSE, yaxt="n", col = alpha(plot_col[3], 0.50), breaks=15)
+mtext(side=2, font=2, line=2.0, "Summer", outer = FALSE)
+mtext(side=1, font=2, line=2.0, "Diet proportion", outer = TRUE)
+```
+
+## Output a csv with n samples for each season
+
+The .csv output can then be combined with the biomass model code to produce consumption estimates. 
+
+```{r}
+outs<- cbind(winter_samples, spring_samples, summer_samples)
+
+write.csv(outs, file = "code outputs/2- modeled_age0_Chinook_samples.csv", row.names = FALSE)
+```
+
