@@ -1,6 +1,6 @@
 # Steller-sea-lion-Biomass-Model-2023
 
-Steller sea lion (Eumetopias jubatus) consumption of ocean age-0 Chinook salmon (Oncorhynchus tshawytscha) along the northwest coast of Washington State
+**Steller sea lion (Eumetopias jubatus) consumption of ocean age-0 Chinook salmon (Oncorhynchus tshawytscha) along the northwest coast of Washington State**
 
 Lewis et al. 2023
 
